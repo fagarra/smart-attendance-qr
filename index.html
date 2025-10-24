@@ -1,0 +1,234 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asistencia Escolar con QR – Prototipo</title>
+  <!-- Librerías CDN -->
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab { padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; }
+    .tab.active { background: #eef6ff; border-color: #7aa7ff; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background:#e6ffed; border:1px solid #86efac; }
+    .warn { background:#fff7ed; border:1px solid #fdba74; }
+    .danger { background:#fee2e2; border:1px solid #fca5a5; }
+    .muted { color:#6b7280; font-size: 12px; }
+    button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+    input, select { padding: 8px; border-radius: 8px; border: 1px solid #d1d5db; }
+    #reader { width: 100%; max-width: 420px; margin-top: 12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(240px,1fr)); gap:12px; }
+    .hint { font-size: 13px; color:#4b5563; }
+  </style>
+</head>
+<body>
+  <h1>Control de Asistencia con QR – Prototipo</h1>
+  <p class="muted">Escanea QR, registra entrada/salida o presencia en aula y visualiza el panel. Incluye generador de QR y alerta simulada de ausentes.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-target="#scan">Escáner</div>
+    <div class="tab" data-target="#panel">Panel</div>
+    <div class="tab" data-target="#qrgen">Generar QR</div>
+    <div class="tab" data-target="#ayuda">Ayuda</div>
+  </div>
+
+  <div id="scan" class="panel active">
+    <div class="card">
+      <div class="row">
+        <label>Tipo de evento:
+          <select id="tipoEvento">
+            <option value="entrada">Entrada</option>
+            <option value="salida">Salida</option>
+            <option value="aula">Presencia en aula</option>
+          </select>
+        </label>
+        <label>Ubicación:
+          <input id="ubicacion" placeholder="Portería / Aula 10-1 / Biblioteca" />
+        </label>
+      </div>
+      <div id="reader"></div>
+      <div id="lastScan" class="hint"></div>
+      <div style="margin-top:8px;" class="row">
+        <button id="start" class="primary">Iniciar cámara</button>
+        <button id="stop">Detener cámara</button>
+        <button id="refreshPanel">Actualizar panel</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel" class="panel">
+    <div class="row" style="margin-bottom:8px;">
+      <button id="loadLatest" class="primary">Cargar últimos registros</button>
+      <button id="simulateAlerts" class="">Alerta simulada (ausentes)</button>
+      <input id="cutoff" type="time" value="07:30" />
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Últimos Eventos</h3>
+        <table id="tblLatest">
+          <thead>
+            <tr><th>Hora</th><th>ID</th><th>Nombre</th><th>Grado</th><th>Evento</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+      <div class="card">
+        <h3>Ausentes (simulado)</h3>
+        <div id="absences"></div>
+      </div>
+    </div>
+  </div>
+
+  <div id="qrgen" class="panel">
+    <div class="card">
+      <h3>Generar QR por estudiante</h3>
+      <div class="row">
+        <input id="qrId" placeholder="student_id (ej. A001)" />
+        <button id="btnQR" class="primary">Generar QR</button>
+      </div>
+      <div id="qrcode" style="margin-top:12px;"></div>
+      <p class="hint">Imprime o guarda el QR para el carné del estudiante.</p>
+    </div>
+  </div>
+
+  <div id="ayuda" class="panel">
+    <div class="card">
+      <h3>Formato de datos del QR</h3>
+      <p>Por simplicidad, el QR contiene <code>student_id</code> (ej. <code>A001</code>). El backend lo cruza con la hoja <b>Estudiantes</b> para rellenar nombre y grado.</p>
+      <h3>Seguridad (demo)</h3>
+      <p>Este prototipo es para demostración. En producción, agrega autenticación del operador y ofusca/valida datos.</p>
+    </div>
+  </div>
+
+  <script>
+    // 1) CONFIGURA TU ENDPOINT DE APPS SCRIPT AQUÍ
+    const BACKEND_URL = "https://script.google.com/macros/s/AKfycbzXWPCyN7NGU0VSKC5jcuEdsPQU1nKk_z8VctX_bCVgfW77OEyVvEHAEcoGf7cR5D-ZXA/exec"; // <-- Reemplaza por tu URL de implementación Apps Script
+
+    // UI de pestañas
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.panel');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelector(t.dataset.target).classList.add('active');
+    }));
+
+    // Generador de QR
+    const qrBtn = document.getElementById('btnQR');
+    qrBtn?.addEventListener('click', () => {
+      const id = document.getElementById('qrId').value.trim();
+      if (!id) { alert('Ingresa student_id'); return; }
+      const box = document.getElementById('qrcode');
+      box.innerHTML = '';
+      new QRCode(box, { text: id, width: 220, height: 220 });
+    });
+
+    // Escáner con html5-qrcode
+    let html5QrCode = null;
+    const readerDivId = 'reader';
+    const lastScan = document.getElementById('lastScan');
+
+    async function postAttendance(student_id, tipo, ubicacion) {
+      const payload = { action: 'attendance', student_id, tipo_evento: tipo, ubicacion, fuente: 'web' };
+      const res = await fetch(BACKEND_URL, {
+        method: 'POST',
+        mode: 'cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      });
+      const data = await res.json();
+      return data;
+    }
+
+    async function startCamera() {
+      if (html5QrCode) return; // ya iniciado
+      html5QrCode = new Html5Qrcode(readerDivId);
+      try {
+        const cams = await Html5Qrcode.getCameras();
+        const camId = cams?.[0]?.id;
+        if (!camId) { alert('No se encontró cámara'); return; }
+        await html5QrCode.start(
+          { deviceId: { exact: camId } },
+          { fps: 10, qrbox: 250 },
+          async decodedText => {
+            const tipo = document.getElementById('tipoEvento').value;
+            const ubicacion = document.getElementById('ubicacion').value || '';
+            lastScan.textContent = `QR leído: ${decodedText} → Enviando…`;
+            try {
+              const r = await postAttendance(decodedText, tipo, ubicacion);
+              lastScan.innerHTML = `✅ Registrado: <b>${r?.nombre || decodedText}</b> (${r?.grado||'-'}) – <span class="badge ok">${tipo}</span>`;
+              loadLatest();
+            } catch (e) {
+              console.error(e);
+              lastScan.textContent = 'Error registrando asistencia';
+            }
+          },
+          err => { /* silencioso */ }
+        );
+      } catch (e) {
+        console.error(e);
+        alert('No se pudo iniciar la cámara');
+      }
+    }
+
+    async function stopCamera() {
+      if (html5QrCode) {
+        await html5QrCode.stop();
+        await html5QrCode.clear();
+        html5QrCode = null;
+      }
+    }
+
+    document.getElementById('start').addEventListener('click', startCamera);
+    document.getElementById('stop').addEventListener('click', stopCamera);
+
+    // Panel: últimos eventos
+    async function loadLatest() {
+      const res = await fetch(`${BACKEND_URL}?action=latest&limit=20`);
+      const data = await res.json();
+      const tbody = document.querySelector('#tblLatest tbody');
+      tbody.innerHTML = '';
+      (data?.rows||[]).forEach(r => {
+        const tr = document.createElement('tr');
+        tr.innerHTML = `<td>${r.timestamp}</td><td>${r.student_id}</td><td>${r.nombre}</td><td>${r.grado}</td><td>${r.tipo_evento}</td><td>${r.ubicacion||''}</td>`;
+        tbody.appendChild(tr);
+      });
+    }
+
+    document.getElementById('loadLatest').addEventListener('click', loadLatest);
+    document.getElementById('refreshPanel').addEventListener('click', loadLatest);
+
+    // Alerta simulada de ausentes
+    async function simulateAlerts() {
+      const cutoff = document.getElementById('cutoff').value || '07:30';
+      const res = await fetch(`${BACKEND_URL}?action=absences&cutoff=${encodeURIComponent(cutoff)}`);
+      const data = await res.json();
+      const box = document.getElementById('absences');
+      box.innerHTML = '';
+      if (!data?.ausentes?.length) { box.innerHTML = '<span class="badge ok">Sin ausentes</span>'; return; }
+      data.ausentes.forEach(s => {
+        const div = document.createElement('div');
+        div.className = 'card';
+        div.innerHTML = `<b>${s.nombre}</b> (${s.student_id}) – ${s.grado}<br><span class="badge danger">Ausente</span> <span class="muted">Acudiente: ${s.email_acudiente||'-'}</span>`;
+        box.appendChild(div);
+      });
+    }
+
+    document.getElementById('simulateAlerts').addEventListener('click', simulateAlerts);
+
+    // Carga inicial
+    loadLatest();
+  </script>
+</body>
+</html>
