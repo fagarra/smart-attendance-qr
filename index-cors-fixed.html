@@ -1,0 +1,205 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asistencia Escolar con QR – Prototipo (CORS Fixed)</title>
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <style>
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab { padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; }
+    .tab.active { background: #eef6ff; border-color: #7aa7ff; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background:#e6ffed; border:1px solid #86efac; }
+    .danger { background:#fee2e2; border:1px solid #fca5a5; }
+    .muted { color:#6b7280; font-size: 12px; }
+    button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
+    input, select { padding: 8px; border-radius: 8px; border: 1px solid #d1d5db; }
+    #reader { width: 100%; max-width: 480px; margin-top: 12px; }
+  </style>
+</head>
+<body>
+  <h1>Control de Asistencia con QR – Prototipo</h1>
+  <p class="muted">Versión con envío <b>form-urlencoded</b> para evitar errores de CORS.</p>
+
+  <div class="tabs">
+    <div class="tab active" data-target="#scan">Escáner</div>
+    <div class="tab" data-target="#panel">Panel</div>
+    <div class="tab" data-target="#qrgen">Generar QR</div>
+  </div>
+
+  <div id="scan" class="panel active">
+    <div class="card">
+      <div class="row">
+        <label>Tipo de evento:
+          <select id="tipoEvento">
+            <option value="entrada">Entrada</option>
+            <option value="salida">Salida</option>
+            <option value="aula">Presencia en aula</option>
+          </select>
+        </label>
+        <label>Ubicación:
+          <input id="ubicacion" placeholder="Portería / Aula 10-1 / Biblioteca" />
+        </label>
+      </div>
+      <div id="reader"></div>
+      <div id="lastScan" class="muted"></div>
+      <div style="margin-top:8px;" class="row">
+        <button id="start" class="primary">Iniciar cámara</button>
+        <button id="stop">Detener cámara</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="panel" class="panel">
+    <div class="card">
+      <button id="loadLatest" class="primary">Cargar últimos registros</button>
+      <table id="tblLatest">
+        <thead>
+          <tr><th>Hora</th><th>ID</th><th>Nombre</th><th>Grado</th><th>Evento</th><th>Ubicación</th></tr>
+        </thead>
+        <tbody></tbody>
+      </table>
+    </div>
+  </div>
+
+  <div id="qrgen" class="panel">
+    <div class="card">
+      <h3>Generar QR</h3>
+      <div class="row">
+        <input id="qrId" placeholder="student_id (ej. A001)" />
+        <button id="btnQR" class="primary">Generar</button>
+      </div>
+      <div id="qrcode" style="margin-top:12px;"></div>
+    </div>
+  </div>
+
+  <script>
+    const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyQWonoGmtuksSbVSdqAnR1rKDR7S0CqtSKqipwE9uLEHcehmVMeVnMXwMPT_6m5cABqA/exec";
+
+    // Tabs
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.panel');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelector(t.dataset.target).classList.add('active');
+    }));
+
+    // QR generator
+    document.getElementById('btnQR').addEventListener('click', () => {
+      const id = document.getElementById('qrId').value.trim();
+      if (!id) { alert('Ingresa un ID'); return; }
+      const qrcode = document.getElementById('qrcode');
+      qrcode.innerHTML = '';
+      new QRCode(qrcode, { text: id, width: 220, height: 220 });
+    });
+
+    // QR scanner
+    let html5QrCode = null;
+    const lastScan = document.getElementById('lastScan');
+     
+    /* 
+    async function postAttendance(student_id, tipo, ubicacion) {
+      const params = new URLSearchParams();
+      params.append('action', 'attendance');
+      params.append('student_id', student_id);
+      params.append('tipo_evento', tipo);
+      params.append('ubicacion', ubicacion);
+      params.append('fuente', 'web');
+
+      const res = await fetch(BACKEND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: params.toString()
+      });
+
+      if (!res.ok) throw new Error('HTTP ' + res.status);
+      return res.json();
+    }*/
+
+    async function postAttendance(student_id, tipo, ubicacion) {
+  const params = new URLSearchParams();
+  params.append('action', 'attendance');
+  params.append('student_id', student_id);
+  params.append('tipo_evento', tipo);
+  params.append('ubicacion', ubicacion);
+  params.append('fuente', 'web');
+
+  const res = await fetch(BACKEND_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+    body: params.toString()
+  });
+
+  const text = await res.text(); // lee bruto por si hay HTML de error
+  if (!res.ok) {
+    throw new Error(`HTTP ${res.status} – ${text.slice(0,300)}`);
+  }
+  try {
+    return JSON.parse(text);
+  } catch {
+    throw new Error(`Respuesta no-JSON del backend: ${text.slice(0,300)}`);
+  }
+}
+
+
+    async function startCamera() {
+      html5QrCode = new Html5Qrcode("reader");
+      const cameras = await Html5Qrcode.getCameras();
+      if (!cameras.length) { alert("No se encontró cámara"); return; }
+      const camId = cameras[0].id;
+      html5QrCode.start(
+        { deviceId: { exact: camId } },
+        { fps: 10, qrbox: 250 },
+        async decodedText => {
+          const tipo = document.getElementById('tipoEvento').value;
+          const ubicacion = document.getElementById('ubicacion').value || '';
+          lastScan.textContent = `QR leído: ${decodedText}`;
+          try {
+            const r = await postAttendance(decodedText, tipo, ubicacion);
+            lastScan.innerHTML = `✅ Registrado: <b>${r?.nombre || decodedText}</b>`;
+            loadLatest();
+          } catch (e) {
+            lastScan.textContent = '❌ Error registrando la asistencia';
+            console.error(e);
+          }
+        }
+      );
+    }
+
+    async function stopCamera() {
+      if (html5QrCode) { await html5QrCode.stop(); html5QrCode.clear(); html5QrCode = null; }
+    }
+
+    document.getElementById('start').addEventListener('click', startCamera);
+    document.getElementById('stop').addEventListener('click', stopCamera);
+
+    async function loadLatest() {
+      try {
+        const res = await fetch(`${BACKEND_URL}?action=latest&limit=10`);
+        const data = await res.json();
+        const tbody = document.querySelector('#tblLatest tbody');
+        tbody.innerHTML = '';
+        (data.rows || []).forEach(r => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${r.timestamp}</td><td>${r.student_id}</td><td>${r.nombre}</td><td>${r.grado}</td><td>${r.tipo_evento}</td><td>${r.ubicacion}</td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (e) { console.error(e); }
+    }
+
+    document.getElementById('loadLatest').addEventListener('click', loadLatest);
+  </script>
+</body>
+</html>
