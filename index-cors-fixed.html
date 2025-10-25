@@ -25,6 +25,7 @@
     button.primary { background: #2563eb; color: #fff; border-color: #1d4ed8; }
     input, select { padding: 8px; border-radius: 8px; border: 1px solid #d1d5db; }
     #reader { width: 100%; max-width: 480px; margin-top: 12px; }
+    .inline { display:inline-flex; align-items:center; gap:6px; }
   </style>
 </head>
 <body>
@@ -51,12 +52,32 @@
           <input id="ubicacion" placeholder="Portería / Aula 10-1 / Biblioteca" />
         </label>
       </div>
+
+      <!--
       <div id="reader"></div>
       <div id="lastScan" class="muted"></div>
       <div style="margin-top:8px;" class="row">
         <button id="start" class="primary">Iniciar cámara</button>
         <button id="stop">Detener cámara</button>
       </div>
+    -->
+
+     <div class="row">
+        <label class="inline">Cámara:
+          <select id="cameraSelect" title="Selecciona la cámara a usar"></select>
+        </label>
+        <button id="applyCamera" title="Cambiar a la cámara seleccionada">Usar cámara seleccionada</button>
+      </div>
+
+      <div id="reader"></div>
+      <div id="lastScan" class="hint"></div>
+
+      <div style="margin-top:8px;" class="row">
+        <button id="start" class="primary">Iniciar cámara</button>
+        <button id="stop">Detener cámara</button>
+        <button id="refreshPanel">Actualizar panel</button>
+      </div>
+      <p class="muted">Sugerencia: abre esta página con <b>HTTPS</b> (GitHub Pages, Netlify, etc.).</p>
     </div>
   </div>
 
@@ -153,7 +174,7 @@
   }
 }
 
-
+/*
     async function startCamera() {
       html5QrCode = new Html5Qrcode("reader");
       const cameras = await Html5Qrcode.getCameras();
@@ -184,6 +205,135 @@
 
     document.getElementById('start').addEventListener('click', startCamera);
     document.getElementById('stop').addEventListener('click', stopCamera);
+    */
+
+  // Escáner QR con selector de cámara
+   // let html5QrCode = null;
+    const readerDivId = 'reader';
+    //const lastScan = document.getElementById('lastScan');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const applyCameraBtn = document.getElementById('applyCamera');
+    let currentDeviceId = null;
+    let devicesCache = [];
+
+    async function listCameras() {
+      try {
+        devicesCache = await Html5Qrcode.getCameras();
+        cameraSelect.innerHTML = '';
+        if (!devicesCache?.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No se encontraron cámaras';
+          cameraSelect.appendChild(opt);
+          return;
+        }
+        devicesCache.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.id;
+          opt.textContent = d.label || d.id;
+          cameraSelect.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Error listando cámaras', e);
+      }
+    }
+
+    async function startWithDevice(deviceId) {
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch(e) {}
+        try { await html5QrCode.clear(); } catch(e) {}
+        html5QrCode = null;
+      }
+      html5QrCode = new Html5Qrcode(readerDivId);
+      currentDeviceId = deviceId;
+
+      const config = { fps: 10, qrbox: 250 };
+      await html5QrCode.start(
+        { deviceId: { exact: deviceId } },
+        config,
+        onScan,
+        onScanError
+      );
+    }
+
+    // Intenta forzar cámara trasera primero (si el UA lo permite)
+    async function startCamera() {
+      try {
+        await listCameras();
+
+        // Intentar con facingMode environment
+        html5QrCode = html5QrCode || new Html5Qrcode(readerDivId);
+        try {
+          await html5QrCode.start(
+            { facingMode: { exact: "environment" } },
+            { fps: 10, qrbox: 250 },
+            onScan,
+            onScanError
+          );
+          // Selecciona opción 'back' o la que coincida con trasera
+          const back = devicesCache.find(d => /back|rear|trase|atrás/i.test(d.label || '')) || devicesCache[0];
+          if (back) cameraSelect.value = back.id;
+          return;
+        } catch (_) {
+          // fallback a la primera del selector
+        }
+
+        const first = cameraSelect.value || devicesCache?.[0]?.id;
+        if (!first) { alert('No se encontró cámara disponible'); return; }
+        await startWithDevice(first);
+      } catch (e) {
+        console.error(e);
+        alert('No se pudo iniciar la cámara. Asegúrate de usar HTTPS y conceder permisos.');
+      }
+    }
+
+    async function stopCamera() {
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch {}
+        try { await html5QrCode.clear(); } catch {}
+        html5QrCode = null;
+        currentDeviceId = null;
+      }
+    }
+
+    applyCameraBtn.addEventListener('click', async () => {
+      const targetId = cameraSelect.value;
+      if (!targetId) return;
+      if (currentDeviceId === targetId && html5QrCode) return; // ya está
+      try {
+        await startWithDevice(targetId);
+      } catch (e) {
+        console.error('No se pudo cambiar de cámara', e);
+        alert('No se pudo cambiar de cámara.');
+      }
+    });
+
+    function onScan(decodedText) {
+      const tipo = document.getElementById('tipoEvento').value;
+      const ubicacion = document.getElementById('ubicacion').value || '';
+      lastScan.textContent = `QR leído: ${decodedText} → Enviando…`;
+      postAttendance(decodedText, tipo, ubicacion)
+        .then(r => {
+          lastScan.innerHTML = `✅ Registrado: <b>${r?.nombre || decodedText}</b> (${r?.grado||'-'}) – <span class="badge ok">${tipo}</span>`;
+          loadLatest();
+        })
+        .catch(e => {
+          console.error(e);
+          lastScan.textContent = 'Error registrando asistencia';
+        });
+    }
+
+    function onScanError(err) {
+      // silencioso
+    }
+
+
+    document.getElementById('start').addEventListener('click', startCamera);
+    document.getElementById('stop').addEventListener('click', stopCamera);
+
+
+
+    //
 
     async function loadLatest() {
       try {
