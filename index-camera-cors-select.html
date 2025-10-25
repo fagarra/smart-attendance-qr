@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Asistencia Escolar con QR – Selector de Cámara + CORS</title>
+  <title>SMART ATTENDANCE QR</title>
   <!-- Librerías CDN -->
   <script src="https://unpkg.com/html5-qrcode" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
@@ -33,7 +33,17 @@
   </style>
 </head>
 <body>
-  <h1>Control de Asistencia con QR – Prototipo</h1>
+  <div>
+    <table>
+      <tr>
+        <td><img src="smart-attendance-qr.png"  width="120" height="120"></td> 
+        <td><img src="logo-feria.png"  width="120" height="120"></td>
+        <td><center><h1>SMART ATTENDANCE QR - PROTOTYPE</h1></center></td>
+        <td><img src="gbac-logo.png"/></td>
+      </tr>
+    </table>     
+   
+  </div> 
   <p class="muted">Incluye <b>selector de cámara</b> y envío <b>form-urlencoded</b> (compatible CORS).</p>
 
   <div class="tabs">
@@ -54,7 +64,7 @@
           </select>
         </label>
         <label>Ubicación:
-          <input id="ubicacion" placeholder="Portería / Aula 10-1 / Biblioteca" />
+          <input id="ubicacion" placeholder="Portería / Aula / Biblioteca " />
         </label>
       </div>
 
@@ -73,7 +83,7 @@
         <button id="stop">Detener cámara</button>
         <button id="refreshPanel">Actualizar panel</button>
       </div>
-      <p class="muted">Abre esta página por <b>HTTPS</b> (GitHub Pages / Netlify) y usa <b>Chrome</b> para permisos de cámara.</p>
+     <!-- <p class="muted">Abre esta página por <b>HTTPS</b> (GitHub Pages / Netlify) y usa <b>Chrome</b> para permisos de cámara.</p>-->
     </div>
   </div>
 
