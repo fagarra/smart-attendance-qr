@@ -1,0 +1,310 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Asistencia Escolar con QR – Selector de Cámara + CORS</title>
+  <!-- Librerías CDN -->
+  <script src="https://unpkg.com/html5-qrcode" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js" defer></script>
+  <style>
+    :root { --accent:#2563eb; --border:#d1d5db; --muted:#6b7280; }
+    body { font-family: system-ui, Arial, sans-serif; margin: 16px; }
+    .tabs { display: flex; gap: 8px; margin-bottom: 16px; flex-wrap: wrap; }
+    .tab { padding: 8px 12px; border: 1px solid #ccc; border-radius: 8px; cursor: pointer; }
+    .tab.active { background: #eef6ff; border-color: #7aa7ff; }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    .row { display: flex; gap: 12px; align-items: center; flex-wrap: wrap; }
+    .card { border: 1px solid #e5e7eb; border-radius: 12px; padding: 12px; margin-bottom: 12px; box-shadow: 0 1px 3px rgba(0,0,0,0.06); }
+    table { width: 100%; border-collapse: collapse; }
+    th, td { padding: 8px; border-bottom: 1px solid #eee; text-align: left; }
+    .badge { padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .ok { background:#e6ffed; border:1px solid #86efac; }
+    .danger { background:#fee2e2; border:1px solid #fca5a5; }
+    .muted { color:var(--muted); font-size: 12px; }
+    button { padding: 8px 12px; border-radius: 8px; border: 1px solid #ccc; background: #fff; cursor: pointer; }
+    button.primary { background: var(--accent); color: #fff; border-color: #1d4ed8; }
+    input, select { padding: 8px; border-radius: 8px; border: 1px solid var(--border); }
+    #reader { width: 100%; max-width: 520px; margin-top: 12px; }
+    .grid { display:grid; grid-template-columns: repeat(auto-fit,minmax(260px,1fr)); gap:12px; }
+    .hint { font-size: 13px; color:#4b5563; }
+    .inline { display:inline-flex; align-items:center; gap:6px; }
+  </style>
+</head>
+<body>
+  <h1>Control de Asistencia con QR – Prototipo</h1>
+  <p class="muted">Incluye <b>selector de cámara</b> y envío <b>form-urlencoded</b> (compatible CORS).</p>
+
+  <div class="tabs">
+    <div class="tab active" data-target="#scan">Escáner</div>
+    <div class="tab" data-target="#panel">Panel</div>
+    <div class="tab" data-target="#qrgen">Generar QR</div>
+    <div class="tab" data-target="#ayuda">Ayuda</div>
+  </div>
+
+  <div id="scan" class="panel active">
+    <div class="card">
+      <div class="row">
+        <label>Tipo de evento:
+          <select id="tipoEvento">
+            <option value="entrada">Entrada</option>
+            <option value="salida">Salida</option>
+            <option value="aula">Presencia en aula</option>
+          </select>
+        </label>
+        <label>Ubicación:
+          <input id="ubicacion" placeholder="Portería / Aula 10-1 / Biblioteca" />
+        </label>
+      </div>
+
+      <div class="row">
+        <label class="inline">Cámara:
+          <select id="cameraSelect" title="Selecciona la cámara a usar"></select>
+        </label>
+        <button id="applyCamera" title="Cambiar a la cámara seleccionada">Usar cámara seleccionada</button>
+      </div>
+
+      <div id="reader"></div>
+      <div id="lastScan" class="hint"></div>
+
+      <div style="margin-top:8px;" class="row">
+        <button id="start" class="primary">Iniciar cámara</button>
+        <button id="stop">Detener cámara</button>
+        <button id="refreshPanel">Actualizar panel</button>
+      </div>
+      <p class="muted">Abre esta página por <b>HTTPS</b> (GitHub Pages / Netlify) y usa <b>Chrome</b> para permisos de cámara.</p>
+    </div>
+  </div>
+
+  <div id="panel" class="panel">
+    <div class="row" style="margin-bottom:8px;">
+      <button id="loadLatest" class="primary">Cargar últimos registros</button>
+    </div>
+    <div class="grid">
+      <div class="card">
+        <h3>Últimos Eventos</h3>
+        <table id="tblLatest">
+          <thead>
+            <tr><th>Hora</th><th>ID</th><th>Nombre</th><th>Grado</th><th>Evento</th><th>Ubicación</th></tr>
+          </thead>
+          <tbody></tbody>
+        </table>
+      </div>
+    </div>
+  </div>
+
+  <div id="qrgen" class="panel">
+    <div class="card">
+      <h3>Generar QR por estudiante</h3>
+      <div class="row">
+        <input id="qrId" placeholder="student_id (ej. A001)" />
+        <button id="btnQR" class="primary">Generar QR</button>
+      </div>
+      <div id="qrcode" style="margin-top:12px;"></div>
+      <p class="hint">Imprime o guarda el QR para el carné del estudiante.</p>
+    </div>
+  </div>
+
+  <div id="ayuda" class="panel">
+    <div class="card">
+      <h3>Formato de datos del QR</h3>
+      <p>El QR codifica <code>student_id</code> (ej. <code>A001</code>). El backend consulta la hoja <b>Estudiantes</b> para nombre y grado.</p>
+      <h3>Seguridad (demo)</h3>
+      <p>Prototipo demostrativo: en producción añade autenticación, validación y firma de datos.</p>
+    </div>
+  </div>
+
+  <script>
+    // 1) CONFIGURA TU ENDPOINT DE APPS SCRIPT AQUÍ
+    const BACKEND_URL = "https://script.google.com/macros/s/AKfycbyQWonoGmtuksSbVSdqAnR1rKDR7S0CqtSKqipwE9uLEHcehmVMeVnMXwMPT_6m5cABqA/exec"; // <-- Reemplaza por tu URL /exec
+
+    // UI de pestañas
+    const tabs = document.querySelectorAll('.tab');
+    const panels = document.querySelectorAll('.panel');
+    tabs.forEach(t => t.addEventListener('click', () => {
+      tabs.forEach(x => x.classList.remove('active'));
+      panels.forEach(p => p.classList.remove('active'));
+      t.classList.add('active');
+      document.querySelector(t.dataset.target).classList.add('active');
+    }));
+
+    // Generador de QR
+    const qrBtn = document.getElementById('btnQR');
+    qrBtn?.addEventListener('click', () => {
+      const id = document.getElementById('qrId').value.trim();
+      if (!id) { alert('Ingresa student_id'); return; }
+      const box = document.getElementById('qrcode');
+      box.innerHTML = '';
+      new QRCode(box, { text: id, width: 220, height: 220 });
+    });
+
+    // Escáner QR con selector de cámara + CORS-friendly POST
+    let html5QrCode = null;
+    const readerDivId = 'reader';
+    const lastScan = document.getElementById('lastScan');
+    const cameraSelect = document.getElementById('cameraSelect');
+    const applyCameraBtn = document.getElementById('applyCamera');
+    let currentDeviceId = null;
+    let devicesCache = [];
+
+    async function listCameras() {
+      try {
+        devicesCache = await Html5Qrcode.getCameras();
+        cameraSelect.innerHTML = '';
+        if (!devicesCache?.length) {
+          const opt = document.createElement('option');
+          opt.value = '';
+          opt.textContent = 'No se encontraron cámaras';
+          cameraSelect.appendChild(opt);
+          return;
+        }
+        devicesCache.forEach(d => {
+          const opt = document.createElement('option');
+          opt.value = d.id;
+          opt.textContent = d.label || d.id;
+          cameraSelect.appendChild(opt);
+        });
+      } catch (e) {
+        console.error('Error listando cámaras', e);
+      }
+    }
+
+    async function startWithDevice(deviceId) {
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch(e) {}
+        try { await html5QrCode.clear(); } catch(e) {}
+        html5QrCode = null;
+      }
+      html5QrCode = new Html5Qrcode(readerDivId);
+      currentDeviceId = deviceId;
+
+      const config = { fps: 10, qrbox: 250 };
+      await html5QrCode.start(
+        { deviceId: { exact: deviceId } },
+        config,
+        onScan,
+        onScanError
+      );
+    }
+
+    // Intenta forzar cámara trasera primero (si el UA lo permite)
+    async function startCamera() {
+      try {
+        await listCameras();
+
+        // Intentar con facingMode environment
+        html5QrCode = html5QrCode || new Html5Qrcode(readerDivId);
+        try {
+          await html5QrCode.start(
+            { facingMode: { exact: "environment" } },
+            { fps: 10, qrbox: 250 },
+            onScan,
+            onScanError
+          );
+          // Selecciona opción 'back' o similar si existe
+          const back = devicesCache.find(d => /back|rear|trase|atrás/i.test(d.label || '')) || devicesCache[0];
+          if (back) cameraSelect.value = back.id;
+          return;
+        } catch (_) {
+          // fallback a la primera del selector
+        }
+
+        const first = cameraSelect.value || devicesCache?.[0]?.id;
+        if (!first) { alert('No se encontró cámara disponible'); return; }
+        await startWithDevice(first);
+      } catch (e) {
+        console.error(e);
+        alert('No se pudo iniciar la cámara. Usa HTTPS y concede permisos.');
+      }
+    }
+
+    async function stopCamera() {
+      if (html5QrCode) {
+        try { await html5QrCode.stop(); } catch {}
+        try { await html5QrCode.clear(); } catch {}
+        html5QrCode = null;
+        currentDeviceId = null;
+      }
+    }
+
+    applyCameraBtn.addEventListener('click', async () => {
+      const targetId = cameraSelect.value;
+      if (!targetId) return;
+      if (currentDeviceId === targetId && html5QrCode) return; // ya está
+      try {
+        await startWithDevice(targetId);
+      } catch (e) {
+        console.error('No se pudo cambiar de cámara', e);
+        alert('No se pudo cambiar de cámara.');
+      }
+    });
+
+    function onScan(decodedText) {
+      const tipo = document.getElementById('tipoEvento').value;
+      const ubicacion = document.getElementById('ubicacion').value || '';
+      lastScan.textContent = `QR leído: ${decodedText} → Enviando…`;
+      postAttendance(decodedText, tipo, ubicacion)
+        .then(r => {
+          lastScan.innerHTML = `✅ Registrado: <b>${r?.nombre || decodedText}</b> (${r?.grado||'-'}) – <span class="badge ok">${tipo}</span>`;
+          loadLatest();
+        })
+        .catch(e => {
+          console.error(e);
+          lastScan.textContent = '❌ Error registrando asistencia';
+        });
+    }
+
+    function onScanError(err) {
+      // silencioso
+    }
+
+    async function postAttendance(student_id, tipo, ubicacion) {
+      const params = new URLSearchParams();
+      params.append('action', 'attendance');
+      params.append('student_id', student_id);
+      params.append('tipo_evento', tipo);
+      params.append('ubicacion', ubicacion);
+      params.append('fuente', 'web');
+
+      const res = await fetch(BACKEND_URL, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8' },
+        body: params.toString()
+      });
+
+      const text = await res.text();
+      if (!res.ok) throw new Error(`HTTP ${res.status} – ${text.slice(0,300)}`);
+      try { return JSON.parse(text); } 
+      catch { throw new Error(`Respuesta no-JSON del backend: ${text.slice(0,300)}`); }
+    }
+
+    // Panel: últimos eventos
+    async function loadLatest() {
+      try {
+        const res = await fetch(`${BACKEND_URL}?action=latest&limit=20`);
+        const data = await res.json();
+        const tbody = document.querySelector('#tblLatest tbody');
+        tbody.innerHTML = '';
+        (data?.rows||[]).forEach(r => {
+          const tr = document.createElement('tr');
+          tr.innerHTML = `<td>${r.timestamp}</td><td>${r.student_id}</td><td>${r.nombre}</td><td>${r.grado}</td><td>${r.tipo_evento}</td><td>${r.ubicacion||''}</td>`;
+          tbody.appendChild(tr);
+        });
+      } catch (e) {
+        console.error('Error cargando últimos eventos', e);
+      }
+    }
+
+    document.getElementById('loadLatest').addEventListener('click', loadLatest);
+    document.getElementById('refreshPanel').addEventListener('click', loadLatest);
+
+    // Hooks de botones
+    document.getElementById('start').addEventListener('click', startCamera);
+    document.getElementById('stop').addEventListener('click', stopCamera);
+
+    // Carga inicial
+    listCameras().then(() => loadLatest());
+  </script>
+</body>
+</html>
